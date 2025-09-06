@@ -24,6 +24,7 @@ import ReactFlow, {
     updateEdge,
     ConnectionMode,
     ReactFlowProvider,
+    ConnectionLineType,
  } from 'reactflow';
 
 import 'reactflow/dist/style.css';
@@ -771,7 +772,7 @@ function Diagram() {
                         style: { stroke: theme.edgeStroke, strokeWidth: 2 },
                         markerEnd: { type: MarkerType.ArrowClosed, color: theme.edgeStroke },
                     }}
-                    connectionLineType="bezier"
+                    connectionLineType={ConnectionLineType.Bezier}
                     // ---------- ADD THIS ----------
                     isValidConnection={(conn: Connection) => {
                         if (!conn.target) return false;
