@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { parseTextToDiagram } from '@/lib/parse';
-import { themes, type ThemeName } from '@/lib/theme';
+import { themes, type ThemeName, type Theme } from '@/lib/theme';
 import ReactFlow, {
     Background,
     Controls,
@@ -19,9 +19,6 @@ import ReactFlow, {
     applyEdgeChanges,
     MarkerType,
     useReactFlow, 
-    getBezierPath,
-    Position,
-    updateEdge,
     ConnectionMode,
     ReactFlowProvider,
     ConnectionLineType,
@@ -88,10 +85,9 @@ function Diagram() {
     useEffect(() => {
         const el = shellRef.current;
         if (!el) return;
-        const t = theme as any;
         (Object.keys(THEME_KEYS) as Array<keyof typeof THEME_KEYS>).forEach((cssVar) => {
-            const k = THEME_KEYS[cssVar];
-            el.style.setProperty(cssVar, String(t[k]));
+            const key = THEME_KEYS[cssVar] as keyof Theme;
+            el.style.setProperty(cssVar, String(theme[key]));
         });
     }, [theme]);
 
@@ -141,6 +137,30 @@ function Diagram() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            const isMac = /\bmac\b/.test(navigator.userAgent.toLowerCase());
+            const meta = isMac ? e.metaKey : e.ctrlKey;
+
+            // Avoid when typing in fields
+            const t = e.target as HTMLElement | null;
+            const isTyping =
+                t &&
+                (t.tagName === 'INPUT' ||
+                    t.tagName === 'TEXTAREA' ||
+                    (t as HTMLElement).isContentEditable);
+
+            if (meta && e.key.toLowerCase() === 'f' && !isTyping) {
+                e.preventDefault(); // stop browser "Find"
+                fitView({ padding: 0.2, duration: 400 });
+            }
+        };
+
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [fitView]);
+
+
     function reattachEdgesByDirection(
         edges: Edge[],
         nodes: Node[],
@@ -189,12 +209,21 @@ function Diagram() {
         },
         []
     );
-    const onEdgeUpdate = useCallback(
-        (oldEdge: Edge, newConnection: Connection) => {
-            setEdges((eds) => updateEdge(oldEdge, newConnection, eds));
-        },
-        []
-    );
+    const onEdgeUpdate = useCallback((oldEdge: Edge, newConnection: Connection) => {
+        setEdges((eds) =>
+            eds.map((e) =>
+                e.id === oldEdge.id
+                    ? {
+                        ...e,
+                        source: newConnection.source ?? e.source,
+                        sourceHandle: newConnection.sourceHandle ?? e.sourceHandle,
+                        target: newConnection.target ?? e.target,
+                        targetHandle: newConnection.targetHandle ?? e.targetHandle,
+                    }
+                    : e,
+            ),
+        );
+    }, []);
 
     // actions
     const handleAddNode = () => {
@@ -220,11 +249,13 @@ function Diagram() {
         });
     };
 
-    const handleNodeDoubleClick = (_: any, node: Node) => {
+    const handleNodeDoubleClick = (_: React.MouseEvent, node: Node) => {
         const newLabel = prompt('Rename node:', String(node.data?.label ?? ''));
         if (newLabel === null) return;
         setNodes((nds) =>
-            nds.map((n) => (n.id === node.id ? { ...n, data: { ...n.data, label: newLabel } } : n))
+            nds.map((n) =>
+                n.id === node.id ? { ...n, data: { ...n.data, label: newLabel } } : n,
+            ),
         );
     };
 
@@ -255,6 +286,10 @@ function Diagram() {
         });
     };
 
+    const handleFitViewClick = () => {
+        // center & zoom to fit everything nicely
+        fitView({ padding: 0.2, duration: 400 });
+    };
 
 
     const handleGenerate = () => setIsGenOpen(true);
@@ -330,8 +365,9 @@ function Diagram() {
             a.href = svgDataUrl;
             a.download = 'diagram.svg';
             a.click();
-        } catch (err: any) {
-            alert(`Could not export SVG: ${err?.message ?? err}`);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            alert(`Could not export SVG: ${msg}`);
         } finally {
             restoreSelection(sel);
         }
@@ -391,221 +427,13 @@ function Diagram() {
             };
             img.onerror = () => alert('Could not render PNG from SVG.');
             img.src = svgDataUrl;
-        } catch (err: any) {
-            alert(`Could not export PNG: ${err?.message ?? err}`);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            alert(`Could not export PNG: ${msg}`);
         } finally {
             restoreSelection(sel);
         }
     };
-
-    // --- Export: PNG via canvas using EXACT handles + React Flow's bezier path ---
-    const handleExportPNGCanvas = async () => {
-        const NODE_W = 180;
-        const NODE_H = 56;
-        const PADDING = 40;
-        const FONT = '12px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial';
-        const EDGE_COLOR = '#9CA3AF';
-        const NODE_BORDER = '#E5E7EB';
-        const TEXT_COLOR = '#111827';
-        const BG = '#ffffff';
-
-        if (!nodes.length) return;
-
-        // Compute bounds
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        nodes.forEach((n) => {
-            const x = n.position.x;
-            const y = n.position.y;
-            minX = Math.min(minX, x);
-            minY = Math.min(minY, y);
-            maxX = Math.max(maxX, x + NODE_W);
-            maxY = Math.max(maxY, y + NODE_H);
-        });
-
-        const width = Math.ceil((maxX - minX) + PADDING * 2);
-        const height = Math.ceil((maxY - minY) + PADDING * 2);
-
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, width);
-        canvas.height = Math.max(1, height);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        // Background
-        ctx.fillStyle = BG;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Node geometry in export space
-        const geo: Record<string, { x: number; y: number; cx: number; cy: number; label: string }> = {};
-        nodes.forEach((n) => {
-            const x = (n.position.x - minX) + PADDING;
-            const y = (n.position.y - minY) + PADDING;
-            const cx = x + NODE_W / 2;
-            const cy = y + NODE_H / 2;
-            const label = String(n.data?.label ?? '');
-            geo[n.id] = { x, y, cx, cy, label };
-        });
-
-        // Map a handle id ("top", "right_t", etc.) to a Position
-        const handleIdToPosition = (hid?: string | null): Position | undefined => {
-            if (!hid) return undefined; // handles undefined OR null
-            const key = hid.replace(/_t$/, '').toLowerCase();
-            if (key === 'top') return Position.Top;
-            if (key === 'right') return Position.Right;
-            if (key === 'bottom') return Position.Bottom;
-            if (key === 'left') return Position.Left;
-            return undefined;
-        };
-
-
-        // Fallback if a handle isn't present (e.g., initialEdges)
-        const fallbackPos = (sx: number, sy: number, tx: number, ty: number): { sp: Position; tp: Position } => {
-            const dx = tx - sx;
-            const dy = ty - sy;
-            if (Math.abs(dx) >= Math.abs(dy)) {
-                // horizontal
-                return {
-                    sp: dx >= 0 ? Position.Right : Position.Left,
-                    tp: dx >= 0 ? Position.Left : Position.Right,
-                };
-            } else {
-                // vertical
-                return {
-                    sp: dy >= 0 ? Position.Bottom : Position.Top,
-                    tp: dy >= 0 ? Position.Top : Position.Bottom,
-                };
-            }
-        };
-
-        // Edges under nodes
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = EDGE_COLOR;
-        ctx.fillStyle = EDGE_COLOR;
-
-        edges.forEach((e) => {
-            const s = geo[e.source];
-            const t = geo[e.target];
-            if (!s || !t) return;
-
-            // Use EXACT sides if available from handles; else fallback heuristic
-            let sp = handleIdToPosition(e.sourceHandle);
-            let tp = handleIdToPosition(e.targetHandle);
-            if (!sp || !tp) {
-                const fb = fallbackPos(s.cx, s.cy, t.cx, t.cy);
-                sp = sp ?? fb.sp;
-                tp = tp ?? fb.tp;
-            }
-
-            // Concrete anchor points on node border based on side
-            const sourceX = sp === Position.Left ? s.x : sp === Position.Right ? s.x + NODE_W : s.cx;
-            const sourceY = sp === Position.Top ? s.y : sp === Position.Bottom ? s.y + NODE_H : s.cy;
-            const targetX = tp === Position.Left ? t.x : tp === Position.Right ? t.x + NODE_W : t.cx;
-            const targetY = tp === Position.Top ? t.y : tp === Position.Bottom ? t.y + NODE_H : t.cy;
-
-            // Exact bezier path (same math as on-screen)
-            const [pathD, labelX, labelY] = getBezierPath({
-                sourceX,
-                sourceY,
-                sourcePosition: sp,
-                targetX,
-                targetY,
-                targetPosition: tp,
-            });
-
-            // Stroke the path
-            const p = new Path2D(pathD);
-            ctx.stroke(p);
-
-            // Arrowhead oriented along the path: use last control point from the "C" command
-            let c2x = targetX, c2y = targetY; // fallback
-            const m = pathD.match(/C\s*([-\d.]+),\s*([-\d.]+)\s*([-\d.]+),\s*([-\d.]+)\s*([-\d.]+),\s*([-\d.]+)/i);
-            if (m) {
-                // const c1x = parseFloat(m[1]); const c1y = parseFloat(m[2]);
-                c2x = parseFloat(m[3]); c2y = parseFloat(m[4]);
-                // const txp = parseFloat(m[5]); const typ = parseFloat(m[6]);
-            }
-            const angle = Math.atan2(targetY - c2y, targetX - c2x);
-            const ah = 8;
-            ctx.beginPath();
-            ctx.moveTo(targetX, targetY);
-            ctx.lineTo(targetX - ah * Math.cos(angle - Math.PI / 6), targetY - ah * Math.sin(angle - Math.PI / 6));
-            ctx.lineTo(targetX - ah * Math.cos(angle + Math.PI / 6), targetY - ah * Math.sin(angle + Math.PI / 6));
-            ctx.closePath();
-            ctx.fill();
-
-            // Label at React Flow's provided label point
-            if (e.label) {
-                ctx.font = FONT;
-                const text = String(e.label);
-                const tw = ctx.measureText(text).width;
-                const padX = 6;
-                // white bg, NO border
-                ctx.fillStyle = BG;
-                roundRect(ctx, labelX - tw / 2 - padX, labelY - 16, tw + padX * 2, 18, 4, true, false);
-                // text
-                ctx.fillStyle = TEXT_COLOR;
-                ctx.fillText(text, labelX - tw / 2, labelY - 3);
-                // restore stroke/fill for next edge
-                ctx.fillStyle = EDGE_COLOR;
-                ctx.strokeStyle = EDGE_COLOR;
-            }
-        });
-
-        // Nodes on top
-        nodes.forEach((n) => {
-            const g = geo[n.id];
-            if (!g) return;
-            ctx.fillStyle = BG;
-            ctx.strokeStyle = NODE_BORDER;
-            ctx.lineWidth = 1.5;
-            roundRect(ctx, g.x, g.y, NODE_W, NODE_H, 8, true, true);
-
-            ctx.font = FONT;
-            ctx.fillStyle = TEXT_COLOR;
-            const text = g.label || '';
-            const tw = ctx.measureText(text).width;
-            ctx.fillText(text, g.cx - tw / 2, g.cy + 4);
-        });
-
-        // Download
-        canvas.toBlob((blob) => {
-            if (!blob) return;
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'diagram.png';
-            a.click();
-            URL.revokeObjectURL(url);
-        }, 'image/png');
-
-        function roundRect(
-            cx: CanvasRenderingContext2D,
-            x: number,
-            y: number,
-            w: number,
-            h: number,
-            r: number,
-            fill: boolean,
-            stroke: boolean
-        ) {
-            const radius = Math.min(r, w / 2, h / 2);
-            cx.beginPath();
-            cx.moveTo(x + radius, y);
-            cx.lineTo(x + w - radius, y);
-            cx.quadraticCurveTo(x + w, y, x + w, y + radius);
-            cx.lineTo(x + w, y + h - radius);
-            cx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-            cx.lineTo(x + radius, y + h);
-            cx.quadraticCurveTo(x, y + h, x, y + h - radius);
-            cx.lineTo(x, y + radius);
-            cx.quadraticCurveTo(x, y, x + radius, y);
-            cx.closePath();
-            if (fill) cx.fill();
-            if (stroke) cx.stroke();
-        }
-    };
-
-
 
     return (
         <main ref={shellRef} className="h-screen w-screen p-4">
@@ -626,6 +454,10 @@ function Diagram() {
 
                     <button onClick={handleAutoLayout} className="px-3 py-1 rounded-md border">
                         Auto-Layout
+                    </button>
+
+                    <button onClick={handleFitViewClick} className="px-3 py-1 rounded-md border">
+                        Fit View
                     </button>
 
                     <select
@@ -661,8 +493,9 @@ function Diagram() {
                                         data.nodes.forEach((n) => updateNodeInternals(n.id));
                                     });
 
-                                } catch (err: any) {
-                                    alert(`Could not load file: ${err?.message ?? err}`);
+                                } catch (err: unknown) {
+                                    const msg = err instanceof Error ? err.message : String(err);
+                                    alert(`Could not load file: ${msg}`);
                                 } finally {
                                     e.currentTarget.value = '';
                                 }
