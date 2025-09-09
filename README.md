@@ -1,36 +1,31 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Lawbandit Chart
 
-## Getting Started
+A web app that turns pasted (or selected) text into an **editable flowchart**, with optional **AI parsing** (when a server key is configured).
 
-First, run the development server:
+## Features
+- Paste text → **Generate diagram** (always works locally)
+- **Auto-layout**: Top→Bottom / Left→Right
+- **Hotkeys**:  
+  - Ctrl/Cmd+F fit view  
+  - Ctrl/Cmd+L auto-layout  
+  - N add node  
+  - Delete remove selection  
+  - Ctrl/Cmd+S export JSON  
+  - Ctrl/Cmd+D duplicate node
+- Add/delete nodes, connect, drag, select; **double-click edge labels** to edit
+- **Export** JSON, **SVG**, **PNG**
+- **Share link** packs `{nodes,edges,theme,layout}` into URL (`?d=...`)
+- **Themes**: light / dark / high-contrast
+- **Autosave** to localStorage
+- **Use AI (if key available)** toggle with graceful fallback to local parser
+- **PDF panel (scaffold)** — UI placeholder for future PDF-to-text selection
 
+## Tech Stack
+Next.js (App Router) · TypeScript · React · React Flow · Dagre · html-to-image
+
+## Run Locally
 ```bash
+git clone https://github.com/omaralzouhayli/lawbandit-chart.git
+cd lawbandit-chart
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
